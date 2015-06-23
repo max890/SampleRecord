@@ -9,6 +9,7 @@ import android.media.AudioFormat;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.PowerManager;
 import android.util.Log;
 import android.view.Display;
@@ -23,12 +24,15 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.RelativeLayout;
 
+import org.bytedeco.javacv.FFmpegFrameRecorder;
+import org.bytedeco.javacv.Frame;
+
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ShortBuffer;
-
-import org.bytedeco.javacv.Frame;
-import org.bytedeco.javacv.FFmpegFrameRecorder;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
 
 public class RecordActivity extends Activity implements OnClickListener {
 
@@ -37,7 +41,7 @@ public class RecordActivity extends Activity implements OnClickListener {
 
     private PowerManager.WakeLock mWakeLock;
 
-    private String ffmpeg_link = "/mnt/sdcard/stream.flv";
+    private String ffmpeg_link = Environment.getExternalStorageDirectory().getAbsolutePath()+"/SampleRecord/stream.flv";
 
     long startTime = 0;
     boolean recording = false;
@@ -75,19 +79,12 @@ public class RecordActivity extends Activity implements OnClickListener {
     private int screenWidth, screenHeight;
     private Button btnRecorderControl;
 
-    /* The number of seconds in the continuous record loop (or 0 to disable loop). */
-    final int RECORD_LENGTH = 10;
-    Frame[] images;
-    long[] timestamps;
-    ShortBuffer[] samples;
-    int imagesIndex, samplesIndex;
-
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
 
-        setContentView(R.layout.main);
+        setContentView(R.layout.activity_record);
 
         PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
         mWakeLock = pm.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK, CLASS_LABEL);
@@ -152,7 +149,7 @@ public class RecordActivity extends Activity implements OnClickListener {
         myInflate = (LayoutInflater) getSystemService(Context.LAYOUT_INFLATER_SERVICE);
         RelativeLayout topLayout = new RelativeLayout(this);
         setContentView(topLayout);
-        LinearLayout preViewLayout = (LinearLayout) myInflate.inflate(R.layout.main, null);
+        LinearLayout preViewLayout = (LinearLayout) myInflate.inflate(R.layout.activity_record, null);
         layoutParam = new RelativeLayout.LayoutParams(screenWidth, screenHeight);
         topLayout.addView(preViewLayout, layoutParam);
 
@@ -190,15 +187,7 @@ public class RecordActivity extends Activity implements OnClickListener {
 
         Log.w(LOG_TAG,"init recorder");
 
-        if (RECORD_LENGTH > 0) {
-            imagesIndex = 0;
-            images = new Frame[RECORD_LENGTH * frameRate];
-            timestamps = new long[images.length];
-            for (int i = 0; i < images.length; i++) {
-                images[i] = new Frame(imageWidth, imageHeight, Frame.DEPTH_UBYTE, 2);
-                timestamps[i] = -1;
-            }
-        } else if (yuvImage == null) {
+        if (yuvImage == null) {
             yuvImage = new Frame(imageWidth, imageHeight, Frame.DEPTH_UBYTE, 2);
             Log.i(LOG_TAG, "create yuvImage");
         }
@@ -244,49 +233,6 @@ public class RecordActivity extends Activity implements OnClickListener {
         audioThread = null;
 
         if (recorder != null && recording) {
-            if (RECORD_LENGTH > 0) {
-                Log.v(LOG_TAG,"Writing frames");
-                try {
-                    int firstIndex = imagesIndex % samples.length;
-                    int lastIndex = (imagesIndex - 1) % images.length;
-                    if (imagesIndex <= images.length) {
-                        firstIndex = 0;
-                        lastIndex = imagesIndex - 1;
-                    }
-                    if ((startTime = timestamps[lastIndex] - RECORD_LENGTH * 1000000L) < 0) {
-                        startTime = 0;
-                    }
-                    if (lastIndex < firstIndex) {
-                        lastIndex += images.length;
-                    }
-                    for (int i = firstIndex; i <= lastIndex; i++) {
-                        long t = timestamps[i % timestamps.length] - startTime;
-                        if (t >= 0) {
-                            if (t > recorder.getTimestamp()) {
-                                recorder.setTimestamp(t);
-                            }
-                            recorder.record(images[i % images.length]);
-                        }
-                    }
-
-                    firstIndex = samplesIndex % samples.length;
-                    lastIndex = (samplesIndex - 1) % samples.length;
-                    if (samplesIndex <= samples.length) {
-                        firstIndex = 0;
-                        lastIndex = samplesIndex - 1;
-                    }
-                    if (lastIndex < firstIndex) {
-                        lastIndex += samples.length;
-                    }
-                    for (int i = firstIndex; i <= lastIndex; i++) {
-                        recorder.recordSamples(samples[i % samples.length]);
-                    }
-                } catch (FFmpegFrameRecorder.Exception e) {
-                    Log.v(LOG_TAG,e.getMessage());
-                    e.printStackTrace();
-                }
-            }
-
             recording = false;
             Log.v(LOG_TAG,"Finishing recording, calling stop and release on recorder");
             try {
@@ -336,25 +282,13 @@ public class RecordActivity extends Activity implements OnClickListener {
             audioRecord = new AudioRecord(MediaRecorder.AudioSource.MIC, sampleAudioRateInHz,
                     AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bufferSize);
 
-            if (RECORD_LENGTH > 0) {
-                samplesIndex = 0;
-                samples = new ShortBuffer[RECORD_LENGTH * sampleAudioRateInHz * 2 / bufferSize + 1];
-                for (int i = 0; i < samples.length; i++) {
-                    samples[i] = ShortBuffer.allocate(bufferSize);
-                }
-            } else {
-                audioData = ShortBuffer.allocate(bufferSize);
-            }
+            audioData = ShortBuffer.allocate(bufferSize);
 
             Log.d(LOG_TAG, "audioRecord.startRecording()");
             audioRecord.startRecording();
 
             /* ffmpeg_audio encoding loop */
             while (runAudioThread) {
-                if (RECORD_LENGTH > 0) {
-                    audioData = samples[samplesIndex++ % samples.length];
-                    audioData.position(0).limit(0);
-                }
                 //Log.v(LOG_TAG,"recording? " + recording);
                 bufferReadResult = audioRecord.read(audioData.array(), 0, audioData.capacity());
                 audioData.limit(bufferReadResult);
@@ -363,7 +297,7 @@ public class RecordActivity extends Activity implements OnClickListener {
                     // If "recording" isn't true when start this thread, it never get's set according to this if statement...!!!
                     // Why?  Good question...
                     if (recording) {
-                        if (RECORD_LENGTH <= 0) try {
+                        try {
                             recorder.recordSamples(audioData);
                             //Log.v(LOG_TAG,"recording " + 1024*i + " to " + 1024*i+1024);
                         } catch (FFmpegFrameRecorder.Exception e) {
@@ -476,16 +410,11 @@ public class RecordActivity extends Activity implements OnClickListener {
                 startTime = System.currentTimeMillis();
                 return;
             }
-            if (RECORD_LENGTH > 0) {
-                int i = imagesIndex++ % images.length;
-                yuvImage = images[i];
-                timestamps[i] = 1000 * (System.currentTimeMillis() - startTime);
-            }
             /* get video data */
             if (yuvImage != null && recording) {
                 ((ByteBuffer)yuvImage.image[0].position(0)).put(data);
 
-                if (RECORD_LENGTH <= 0) try {
+                try {
                     Log.v(LOG_TAG,"Writing Frame");
                     long t = 1000 * (System.currentTimeMillis() - startTime);
                     if (t > recorder.getTimestamp()) {
