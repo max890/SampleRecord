@@ -9,9 +9,6 @@ import android.media.AudioFormat;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
 import android.os.Bundle;
-import android.os.Environment;
-import android.os.Handler;
-import android.os.HandlerThread;
 import android.os.PowerManager;
 import android.util.Log;
 import android.view.Display;
@@ -31,7 +28,6 @@ import org.bytedeco.javacv.FFmpegFrameRecorder;
 import org.bytedeco.javacv.Frame;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.nio.ShortBuffer;
 import java.util.Collections;
 import java.util.Comparator;
@@ -57,7 +53,7 @@ public class RecordActivity extends Activity implements OnClickListener {
     private int imageWidth = 640;
     private int imageHeight = 480;
     private int frameRate = 30;
-    private int bitrate = 1 * 1024 * 1024;
+    private int bitrate = 2 * 1024 * 1024;
 
     /* audio data getting thread */
     private AudioRecord audioRecord;
@@ -68,8 +64,6 @@ public class RecordActivity extends Activity implements OnClickListener {
     /* video data getting thread */
     private Camera cameraDevice;
     private CameraView cameraView;
-
-    private Frame yuvImage = null;
 
     /* layout setting */
     private final int bg_screen_bx = 232;
@@ -192,20 +186,18 @@ public class RecordActivity extends Activity implements OnClickListener {
 
         Log.w(LOG_TAG, "init recorder");
 
-        if (yuvImage == null) {
-            yuvImage = new Frame(imageWidth, imageHeight, Frame.DEPTH_UBYTE, 2);
-            Log.i(LOG_TAG, "create yuvImage");
-        }
-
         Log.i(LOG_TAG, "ffmpeg_url: " + ffmpeg_link);
         recorder = new FFmpegFrameRecorder(ffmpeg_link, imageWidth, imageHeight, 1);
         recorder.setFormat("flv");
         recorder.setSampleRate(sampleAudioRateInHz);
         recorder.setVideoBitrate(bitrate);
+        recorder.setVideoCodec(avcodec.AV_CODEC_ID_FLV1);
         // Set in the surface changed method
         recorder.setFrameRate(frameRate);
-
-        bufferHandler = new FrameBufferHandler(recorder);
+        recorder.setInterleaved(true);
+        recorder.setImageWidth(imageWidth);
+        recorder.setImageHeight(imageHeight);
+        bufferHandler = new FrameBufferHandler(recorder, imageWidth, imageHeight);
 
         Log.i(LOG_TAG, "recorder initialize success");
 
@@ -252,10 +244,7 @@ public class RecordActivity extends Activity implements OnClickListener {
             }
             if (bufferHandler.isRunning()) {
                 bufferHandler.stop();
-                bufferHandler = null;
             }
-            recorder = null;
-
         }
     }
 
@@ -346,7 +335,7 @@ public class RecordActivity extends Activity implements OnClickListener {
             mCamera = camera;
             mHolder = getHolder();
             mHolder.addCallback(CameraView.this);
-            mHolder.setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS);
+//            mHolder.setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS);
             mCamera.setPreviewCallback(CameraView.this);
         }
 
@@ -424,24 +413,25 @@ public class RecordActivity extends Activity implements OnClickListener {
 
         @Override
         public void onPreviewFrame(byte[] data, Camera camera) {
-//            timeStart = System.currentTimeMillis();
             if (audioRecord == null || audioRecord.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) {
                 startTime = System.currentTimeMillis();
                 return;
             }
             /* get video data */
-            if (yuvImage != null && recording) {
-                ((ByteBuffer)yuvImage.image[0].position(0)).put(data);
-
+            if (recording) {
                 Log.v(LOG_TAG,"Writing Frame");
-//                long t = 1000 * (System.currentTimeMillis() - startTime);
+                long t = 1000 * (System.currentTimeMillis() - startTime);
 //                if (t > recorder.getTimestamp()) {
 //                    recorder.setTimestamp(t);
 //                }
                 Log.w("Buffer", "difference: " + difference);
                 if (difference >= (1000 / frameRate)) {
-                    if (bufferHandler.isRunning()) {
-                        bufferHandler.putFrame(yuvImage);
+                    if (data != null && bufferHandler.isRunning()) {
+                        try {
+                            bufferHandler.putFrame(data);
+                        } catch (InterruptedException e) {
+                            e.printStackTrace();
+                        }
                     }
                     difference = 0;
                     Log.w("Buffer", "difference: is 0: " + difference);
@@ -449,7 +439,7 @@ public class RecordActivity extends Activity implements OnClickListener {
                 
             }
             timeEnd = System.currentTimeMillis();
-            difference += (timeEnd - timeStart) / 10;
+            difference += (timeEnd - timeStart);
             fpsTime += timeEnd - timeStart;
             Log.d("Buffer", "time = " + (timeEnd - timeStart));
             timeStart = System.currentTimeMillis();
@@ -457,9 +447,6 @@ public class RecordActivity extends Activity implements OnClickListener {
                 fpsCount++;
             } else {
                 Log.w("fps", "fps: " + fpsCount);
-//                if (bufferHandler.isRunning() && fpsCount <= frameRate) {
-//                        bufferHandler.putFrame(yuvImage);
-//                }
                 fpsTime = 0;
                 fpsCount = 0;
             }
