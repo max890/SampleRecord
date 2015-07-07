@@ -23,6 +23,8 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.RelativeLayout;
 
+import com.sample.javacv.samplerecord.models.FrameItem;
+
 import org.bytedeco.javacpp.avcodec;
 import org.bytedeco.javacv.FFmpegFrameRecorder;
 import org.bytedeco.javacv.Frame;
@@ -194,21 +196,21 @@ public class RecordActivity extends Activity implements OnClickListener {
         recorder.setVideoCodec(avcodec.AV_CODEC_ID_FLV1);
         // Set in the surface changed method
         recorder.setFrameRate(frameRate);
-        recorder.setInterleaved(true);
         recorder.setImageWidth(imageWidth);
         recorder.setImageHeight(imageHeight);
         bufferHandler = new FrameBufferHandler(recorder, imageWidth, imageHeight);
 
         Log.i(LOG_TAG, "recorder initialize success");
 
-        audioRecordRunnable = new AudioRecordRunnable();
-        audioThread = new Thread(audioRecordRunnable);
-        runAudioThread = true;
     }
 
     public void startRecording() {
 
         initRecorder();
+
+        audioRecordRunnable = new AudioRecordRunnable();
+        audioThread = new Thread(audioRecordRunnable);
+        runAudioThread = true;
 
         try {
             recorder.start();
@@ -419,7 +421,7 @@ public class RecordActivity extends Activity implements OnClickListener {
             }
             /* get video data */
             if (recording) {
-                Log.v(LOG_TAG,"Writing Frame");
+                Log.v(LOG_TAG, "Writing Frame");
                 long t = 1000 * (System.currentTimeMillis() - startTime);
 //                if (t > recorder.getTimestamp()) {
 //                    recorder.setTimestamp(t);
@@ -428,7 +430,7 @@ public class RecordActivity extends Activity implements OnClickListener {
                 if (difference >= (1000 / frameRate)) {
                     if (data != null && bufferHandler.isRunning()) {
                         try {
-                            bufferHandler.putFrame(data);
+                            bufferHandler.putFrame(new FrameItem(data, t));
                         } catch (InterruptedException e) {
                             e.printStackTrace();
                         }

@@ -2,6 +2,8 @@ package com.sample.javacv.samplerecord;
 
 import android.util.Log;
 
+import com.sample.javacv.samplerecord.models.FrameItem;
+
 import org.bytedeco.javacv.FFmpegFrameRecorder;
 import org.bytedeco.javacv.Frame;
 import org.bytedeco.javacv.FrameRecorder;
@@ -11,21 +13,21 @@ import java.util.concurrent.LinkedBlockingQueue;
 
 public class FrameBufferHandler implements Runnable{
 
-    private LinkedBlockingQueue<byte []> frameQueue;// = new LinkedList();
+    private LinkedBlockingQueue<FrameItem> frameQueue;// = new LinkedList();
     private FFmpegFrameRecorder recorder;
     private Thread t;
     private boolean running = false;
     private Frame yuvImage = null;
     private static String TAG = "Buffer";
 
-    public void putFrame(byte[] data) throws InterruptedException {
+    public void putFrame(FrameItem data) throws InterruptedException {
         if (frameQueue.size() < 20) {
             frameQueue.put(data);
         }
         Log.d(TAG, "putFrame, count: " + frameQueue.size() );
     }
 
-    private byte[] getFrame() throws InterruptedException {
+    private FrameItem getFrame() throws InterruptedException {
         Log.d(TAG, "getFrame, count: " + frameQueue.size() );
         return frameQueue.take();
     }
@@ -42,7 +44,11 @@ public class FrameBufferHandler implements Runnable{
         while(!Thread.interrupted()) {
                 try {
                     if (frameQueue != null && !frameQueue.isEmpty()) {
-                        ((ByteBuffer) yuvImage.image[0].position(0)).put(getFrame());
+                        FrameItem item = getFrame();
+                        if (item.getTime() > recorder.getTimestamp()) {
+                            recorder.setTimestamp(item.getTime());
+                        }
+                        ((ByteBuffer) yuvImage.image[0].position(0)).put(item.getData());
                         recorder.record(yuvImage);
                     }
                 } catch (FrameRecorder.Exception e) {
